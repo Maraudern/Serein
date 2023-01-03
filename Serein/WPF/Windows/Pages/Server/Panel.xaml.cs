@@ -1,6 +1,8 @@
-﻿using Serein.Base;
+﻿using Microsoft.Web.WebView2.Core;
+using Serein.Base;
 using Serein.Items;
 using Serein.Server;
+using System;
 using System.Timers;
 using System.Windows;
 using System.Windows.Input;
@@ -9,23 +11,62 @@ using Wpf.Ui.Controls;
 
 namespace Serein.Windows.Pages.Server
 {
-    public partial class Panel : UiPage
+    public partial class Panel : UiPage, IDisposable
     {
         public Panel()
         {
             InitializeComponent();
             ResourcesManager.InitConsole();
-            PanelWebBrowser.ScriptErrorsSuppressed = true;
-            PanelWebBrowser.IsWebBrowserContextMenuEnabled = false;
-            PanelWebBrowser.WebBrowserShortcutsEnabled = false;
-            PanelWebBrowser.Navigate(@"file:\\\" + Global.Path + $"console\\console.html?type=panel&theme={(Theme.GetAppTheme() == ThemeType.Light ? "light" : "dark")}");
+            Catalog.Server.Panel?.Dispose();
             Timer UpdateInfoTimer = new Timer(2000) { AutoReset = true };
             UpdateInfoTimer.Elapsed += (sender, e) => UpdateInfos();
             UpdateInfoTimer.Start();
+            PanelWebBrowser.EnsureCoreWebView2Async(CoreWebView2Environment.CreateAsync(userDataFolder: IO.GetPath("cache", "WebViewData")).GetAwaiter().GetResult());
             Catalog.Server.Panel = this;
         }
 
-        private bool Restored;
+        public void Dispose()
+        {
+            Dispatcher.Invoke(() =>
+            {
+                PanelWebBrowser.Stop();
+                PanelWebBrowser.Dispose();
+            });
+        }
+
+        public void AppendText(string Line)
+            => Dispatcher.Invoke(() =>
+                PanelWebBrowser.CoreWebView2.ExecuteScriptAsync($"AppendText(\"{Line.Replace(@"\", "\\").Replace("\"", "\\\"")}\")"));
+
+        private void PanelWebBrowser_NavigationCompleted(object sender, CoreWebView2NavigationCompletedEventArgs e)
+        {
+            Logger.Out(LogType.Debug, string.Join(";", Catalog.Server.Cache));
+            Catalog.Server.Cache.ForEach((Text) => AppendText(Text));
+        }
+
+        private void PanelWebBrowser_CoreWebView2InitializationCompleted(object sender, CoreWebView2InitializationCompletedEventArgs e)
+        {
+            if (e.IsSuccess)
+            {
+                PanelWebBrowser.CoreWebView2.Settings.IsGeneralAutofillEnabled = false;
+                if (!Global.Settings.Serein.DevelopmentTool.EnableDebug)
+                {
+                    PanelWebBrowser.CoreWebView2.Settings.AreBrowserAcceleratorKeysEnabled = false;
+                    PanelWebBrowser.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+                    PanelWebBrowser.CoreWebView2.Settings.AreDefaultScriptDialogsEnabled = false;
+                    PanelWebBrowser.CoreWebView2.Settings.AreDevToolsEnabled = false;
+                    PanelWebBrowser.CoreWebView2.Settings.AreHostObjectsAllowed = false;
+                    PanelWebBrowser.CoreWebView2.Settings.IsSwipeNavigationEnabled = false;
+                    PanelWebBrowser.CoreWebView2.Settings.IsStatusBarEnabled = false;
+                }
+                PanelWebBrowser.CoreWebView2.Navigate(@"file:\\\" + Global.Path + $"console\\console.html?type=panel&theme={(Theme.GetAppTheme() == ThemeType.Light ? "light" : "dark")}");
+            }
+            else
+            {
+                Logger.Out(LogType.Debug, e.InitializationException);
+                Logger.MsgBox("控制台加载失败\n" + e.InitializationException.Message, "Serein", 0, 48);
+            }
+        }
 
         private void Start_Click(object sender, RoutedEventArgs e)
             => ServerManager.Start();
@@ -85,9 +126,6 @@ namespace Serein.Windows.Pages.Server
             }
         }
 
-        public void AppendText(string Line)
-            => Dispatcher.Invoke(() => PanelWebBrowser.Document.InvokeScript("AppendText", new object[] { Line }));
-
         private void UpdateInfos()
             => Dispatcher.Invoke(() =>
             {
@@ -104,25 +142,5 @@ namespace Serein.Windows.Pages.Server
                 CPUPerc.Content = ServerManager.Status ? "%" + ServerManager.CPUUsage.ToString("N2") : "-";
                 Catalog.MainWindow.UpdateTitle(ServerManager.Status ? ServerManager.StartFileName : null);
             });
-
-        private void UiPage_Loaded(object sender, RoutedEventArgs e)
-        {
-            Timer Restorer = new Timer(500) { AutoReset = true };
-            Restorer.Elapsed += (_sender, _e) => Dispatcher.Invoke(() =>
-            {
-                Logger.Out(LogType.Debug, string.Join(";", Catalog.Server.Cache));
-                if (!Restored && PanelWebBrowser.ReadyState == System.Windows.Forms.WebBrowserReadyState.Complete)
-                {
-                    Catalog.Server.Cache.ForEach((Text) => AppendText(Text));
-                    Restored = true;
-                }
-                if (Restored)
-                {
-                    Restorer.Stop();
-                    Restorer.Dispose();
-                }
-            });
-            Restorer.Start();
-        }
     }
 }

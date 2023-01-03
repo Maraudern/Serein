@@ -1,4 +1,5 @@
-﻿using NCrontab;
+﻿using Microsoft.Web.WebView2.Core;
+using NCrontab;
 using Notification.Wpf;
 using Serein.Base;
 using Serein.JSPlugin;
@@ -35,6 +36,7 @@ namespace Serein.Windows
                 Watcher.Watch(this, BackgroundType.Tabbed, true);
             }
             Theme.Apply(Global.Settings.Serein.UseDarkTheme ? ThemeType.Dark : ThemeType.Light);
+            CoreWebView2Environment.SetLoaderDllFolderPath(IO.GetPath("runtimes", "win-x64", "native"));
         }
 
         private void UiWindow_ContentRendered(object sender, EventArgs e)
@@ -51,15 +53,24 @@ namespace Serein.Windows
 
         private void UiWindow_Closing(object sender, CancelEventArgs e)
         {
-            e.Cancel = ServerManager.Status;
+            if (e != null)
+            {
+                e.Cancel = true;
+            }
+            Hide();
+            ShowInTaskbar = false;
             if (ServerManager.Status)
             {
-                ShowInTaskbar = false;
-                Hide();
                 Catalog.Notification.Show("Serein", "服务器进程仍在运行中\n已自动最小化至托盘，点击托盘图标即可复原窗口");
             }
             else
+            {
+                Catalog.Server.Panel?.Dispose();
+                Catalog.Function.JSPlugin?.Dispose();
+                Catalog.Function.Bot?.Dispose();
                 JSFunc.Trigger(Items.EventType.SereinClose);
+                Environment.Exit(0);
+            }
         }
 
         private void Hide_Click(object sender, RoutedEventArgs e)
@@ -69,14 +80,7 @@ namespace Serein.Windows
         }
 
         private void Exit_Click(object sender, RoutedEventArgs e)
-        {
-            if (!ServerManager.Status)
-            {
-                Close();
-            }
-            else
-                Catalog.Notification.Show("Serein", "服务器进程仍在运行中\n已自动最小化至托盘，点击托盘图标即可复原窗口");
-        }
+            => UiWindow_Closing(null, null);
 
         /// <summary>
         /// 显示底部通知栏
